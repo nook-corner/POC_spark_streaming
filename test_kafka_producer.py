@@ -1,46 +1,79 @@
-from confluent_kafka import Producer
+import pytest
+from confluent_kafka import Consumer
 import json
-import time
+from collections import Counter
+from datetime import datetime
+from test_config import KAFKA_BROKER, TOPIC
 
-# ตั้งค่าการเชื่อมต่อ Kafka
-KAFKA_BROKER = "localhost:9092"
-TOPIC = "mock_txn_v1"
+@pytest.fixture
+def kafka_consumer():
+    return Consumer({
+        "bootstrap.servers": KAFKA_BROKER,
+        "group.id": "test-consumer-group",
+        "auto.offset.reset": "earliest"
+    })
 
-producer_config = {
-    "bootstrap.servers": KAFKA_BROKER
-}
+def test_kafka_record_count(kafka_consumer):
+    kafka_consumer.subscribe([TOPIC])
+    messages = []
+    for _ in range(20): 
+        msg = kafka_consumer.poll(5.0)
+        if msg is not None:
+            messages.append(json.loads(msg.value().decode("utf-8")))
+    
+    kafka_consumer.close()
+    assert len(messages) == 20, f"อ่านข้อความได้แค่ {len(messages)} ข้อความ"
 
-producer = Producer(producer_config)
+def test_kafka_symbol_count(kafka_consumer):
+    kafka_consumer.subscribe([TOPIC])
+    messages = []
+    for _ in range(20): 
+        msg = kafka_consumer.poll(5.0)
+        if msg is not None:
+            messages.append(json.loads(msg.value().decode("utf-8")))
+    
+    kafka_consumer.close()
+    
+    symbol_counts = Counter(msg["symbol"] for msg in messages)
+    missing_symbols = []
+    
+    for symbol in ["AAPL", "GOOGL", "TSLA"]:
+        if symbol_counts.get(symbol, 0) != 4:
+            missing_symbols.append(f"{symbol} {symbol_counts.get(symbol, 0)}")
+    
+    assert not missing_symbols, "จำนวนหุ้นไม่ถูกต้อง: " + ", ".join(missing_symbols)
 
-# ข้อมูลจำลอง 20 ชุด (เรียงข้อมูลแบบไม่มี order_type ขึ้นก่อน)
-test_data = [
-    {"txn_id": "txn_011", "timestamp": "2025-03-10T13:00:00", "symbol": "AAPL", "price": 250.75, "volume": 120, "buyer": "Adam", "seller": "Brian"},
-    {"txn_id": "txn_012", "timestamp": "2025-03-10T13:01:00", "symbol": "GOOGL", "price": 1800.50, "volume": 80, "buyer": "Cathy", "seller": "David"},
-    {"txn_id": "txn_013", "timestamp": "2025-03-10T13:02:00", "symbol": "TSLA", "price": 750.30, "volume": 200, "buyer": "Ellen", "seller": "Frank"},
-    {"txn_id": "txn_014", "timestamp": "2025-03-10T13:03:00", "symbol": "AMZN", "price": -20.00, "volume": 50, "buyer": "Grace", "seller": "Hank"},
-    {"txn_id": "txn_015", "timestamp": "2025-03-10T13:04:00", "symbol": "MSFT", "price": 600.20, "volume": -10, "buyer": "Ivy", "seller": "Jack"},
-    {"txn_id": "txn_016", "timestamp": "2025-03-10T13:05:00", "symbol": "FB", "price": "NaN", "volume": 90, "buyer": "Ken", "seller": "Leo"},
-    {"txn_id": "txn_017", "timestamp": "2025-03-10T13:06:00", "symbol": "NFLX", "price": 399.99, "volume": "text instead of int", "buyer": "Mia", "seller": "Nick"},
-    {"txn_id": "txn_018", "timestamp": "2025-03-10T13:07:00", "symbol": "GOOGL", "price": 1200.00, "volume": 0, "buyer": "Olivia", "seller": "Peter"},
-    {"txn_id": "txn_019", "timestamp": "2025-03-10T13:08:00", "symbol": "TSLA", "price": 800.75, "volume": 150, "buyer": "Quinn", "seller": "Ryan12345"},
-    {"txn_id": "txn_020", "timestamp": "2025-03-10T13:09:00", "symbol": "AAPL", "price": 1025.00, "volume": 175, "buyer": "Sophia", "seller": "Tom"},
-    {"txn_id": "txn_001", "timestamp": "2025-03-10T12:34:56", "symbol": "AAPL", "price": 150.5, "volume": 100, "buyer": "Alice", "seller": "Bob", "order_type": "LIMIT"},
-    {"txn_id": "txn_002", "timestamp": "2025-03-10T12:35:56", "symbol": "GOOGL", "price": 1200.75, "volume": 50, "buyer": "Charlie", "seller": "Dave", "order_type": "MARKET"},
-    {"txn_id": "txn_003", "timestamp": "2025-03-10T12:36:56", "symbol": "TSLA", "price": -5.0, "volume": 20, "buyer": "Eve", "seller": "Frank", "order_type": "LIMIT"},
-    {"txn_id": "txn_004", "timestamp": "2025-03-10T12:37:56", "symbol": "AMZN", "price": 500.25, "volume": -30, "buyer": "Grace", "seller": "Hank", "order_type": "LIMIT"},
-    {"txn_id": "txn_005", "timestamp": "2025-03-10T12:38:56", "symbol": "MSFT", "price": 700.50, "volume": 0, "buyer": "Ivy", "seller": "Jack", "order_type": "MARKET"},
-    {"txn_id": "txn_006", "timestamp": "2025-03-10T12:39:56", "symbol": "FB", "price": 250.10, "volume": 150, "buyer": "Ken", "seller": "Leo", "order_type": "LIMIT"},
-    {"txn_id": "txn_007", "timestamp": "2025-03-10T12:40:56", "symbol": "NFLX", "price": "not_a_number", "volume": 80, "buyer": "Mia", "seller": "Nick", "order_type": "LIMIT"},
-    {"txn_id": "txn_008", "timestamp": "2025-03-10T12:41:56", "symbol": "GOOGL", "price": 1300.55, "volume": "string_instead_of_int", "buyer": "Olivia", "seller": "Peter", "order_type": "MARKET"},
-    {"txn_id": "txn_009", "timestamp": "2025-03-10T12:42:56", "symbol": "TSLA", "price": 999.99, "volume": 200, "buyer": "Quinn", "seller": "Ryan", "order_type": "LIMIT"},
-    {"txn_id": "txn_010", "timestamp": "2025-03-10T12:43:56", "symbol": "AAPL", "price": 1500.75, "volume": 10, "buyer": "Sophia", "seller": "Tom", "order_type": "UNKNOWN_TYPE"}
-]
-
-# ส่งข้อมูลไป Kafka
-for record in test_data:
-    producer.produce(TOPIC, key=record["txn_id"], value=json.dumps(record))
-    print(f"Sent: {record}")
-    time.sleep(1)
-
-producer.flush()
-print("All test data sent to Kafka successfully!")
+def test_kafka_data_types(kafka_consumer):
+    kafka_consumer.subscribe([TOPIC])
+    messages = []
+    for _ in range(20): 
+        msg = kafka_consumer.poll(5.0)
+        if msg is not None:
+            messages.append(json.loads(msg.value().decode("utf-8")))
+    
+    kafka_consumer.close()
+    
+    for msg in messages:
+        errors = []
+        if not isinstance(msg["txn_id"], str):
+            errors.append("txn_id ควรเป็น string")
+        if not isinstance(msg["symbol"], str):
+            errors.append("symbol ควรเป็น string")
+        if not isinstance(msg["buyer"], str):
+            errors.append("buyer ควรเป็น string")
+        if not isinstance(msg["seller"], str):
+            errors.append("seller ควรเป็น string")
+        if "order_type" in msg and not isinstance(msg["order_type"], str):
+            errors.append("order_type ควรเป็น string")
+        
+        try:
+            datetime.fromisoformat(msg["timestamp"])
+        except ValueError:
+            errors.append("timestamp ไม่อยู่ในรูปแบบที่ถูกต้อง (ISO format)")
+        
+        if not isinstance(msg["price"], (float, int)):
+            errors.append("price ควรเป็น float หรือ double")
+        if not isinstance(msg["volume"], int):
+            errors.append("volume ควรเป็น int")
+        
+        assert not errors, "Data Type ไม่ถูกต้อง: " + ", ".join(errors)
