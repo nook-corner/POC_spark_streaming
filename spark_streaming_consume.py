@@ -6,11 +6,12 @@ import requests
 import logging
 import time
 
+# สร้าง Spark Session
 spark = SparkSession.builder \
     .appName("Kafka-Databricks-Streaming") \
     .getOrCreate()
 
-#Kafka Config
+# เชื่อมต่อ Kafka
 kafka_df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "45.33.103.86:9092") \
@@ -20,10 +21,10 @@ kafka_df = spark.readStream \
     .option("kafka.group.id", "spark-consumer-group-1") \
     .load()
 
-
+# ตัด 5 bytes แรก (Magic Byte + Schema ID)
 cleaned_kafka_df = kafka_df.withColumn("cleaned_value", expr("substring(value, 6, length(value)-5)"))
 
-
+# ดึง Schema จาก Schema Registry
 schema_registry_url = "http://45.33.103.86:8081"
 schema_subject = "mock_txn_v1-value"
 
@@ -37,9 +38,10 @@ def get_latest_schema():
 
 avro_schema = get_latest_schema()
 
+# ถอดรหัส Avro Binary เป็น JSON
 decoded_df = cleaned_kafka_df.select(from_avro(col("cleaned_value"), avro_schema).alias("data")).select("data.*")
 
-# Validation
+# Validation Rules
 df_valid = decoded_df.filter(
     (col("txn_id").isNotNull()) &
     (col("timestamp").isNotNull()) &
@@ -50,7 +52,7 @@ df_valid = decoded_df.filter(
     (col("seller").isNotNull())
 )
 
-df_invalid = df_value.filter(
+df_invalid = decoded_df.filter(
     (col("txn_id").isNull()) |
     (col("timestamp").isNull()) |
     (col("symbol").isNull()) |
@@ -61,7 +63,7 @@ df_invalid = df_value.filter(
 ).withColumn("error_reason", lit("Missing or invalid values"))
 
 
-#Checkpoint
+# ตั้งค่าที่เก็บ Checkpoint
 checkpoint_path = "dbfs:/mnt/checkpoints/mock_txn"
 
 def process_batch_valid(df, epoch_id):
@@ -95,6 +97,7 @@ def process_batch_invalid(df, epoch_id):
     else:
         logging.error("All retry attempts failed for mock_txn_dlq")
 
+# เขียนข้อมูลที่ผ่านการตรวจสอบลง Staging Table
 query_valid = df_valid.writeStream \
     .outputMode("append") \
     .foreachBatch(process_batch_valid) \
@@ -102,6 +105,7 @@ query_valid = df_valid.writeStream \
     .option("checkpointLocation", checkpoint_path) \
     .start()
 
+# เขียนข้อมูลที่ไม่ผ่าน Validation ลง DLQ Table
 query_invalid = df_invalid.writeStream \
     .outputMode("append") \
     .foreachBatch(process_batch_invalid) \
